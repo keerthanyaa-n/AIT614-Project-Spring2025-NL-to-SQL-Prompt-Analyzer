@@ -102,3 +102,17 @@ This will start the Streamlit server, and you can access the application through
 
 Logging
 Application logs (including errors and informational messages) are configured in config/logging_config.py and are written to the logs/ directory (e.g., logs/nl2sql_analyzer.log) and also displayed on the console.
+
+
+
+## ToDO 
+1. Connect to mongo DB 
+2. test MongoDB connection, with sample feedback values being pushed in to MongoDB 
+3. Add langgraph nodes 
+4. Add LLM nodes to depict sample Node flows 
+5. Error handling
+6. testing the above pointers
+7. LLM selection
+8. DB creation 
+9. INtegrate Prompts 
+10. test and evaluate. 
