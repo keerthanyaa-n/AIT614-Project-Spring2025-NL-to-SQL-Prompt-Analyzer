@@ -103,6 +103,42 @@ This will start the Streamlit server, and you can access the application through
 Logging
 Application logs (including errors and informational messages) are configured in config/logging_config.py and are written to the logs/ directory (e.g., logs/nl2sql_analyzer.log) and also displayed on the console.
 
+## Working Components
+
+This section describes parts of the application that are implemented and functional, even if some underlying operations (like LLM calls or DB saves) are currently simulated.
+
+### Streamlit Interface (`app/main_streamlit.py`)
+
+* **Entry Point:** The application is launched via `streamlit run app/main_streamlit.py`.
+
+* **Layout:** Features a wide layout with:
+    * A **Sidebar** for global configuration (selecting Dataset, Prompt Technique, LLM) and for entering optional Ground Truth SQL for evaluation purposes.
+    * A **Main Area** organized into Tabs: "NL Query Test", "Evaluation Analytics" (placeholder), and "Run History" (placeholder).
+
+* **NL Query Test Tab:**
+    * Allows users to input a natural language query.
+    * A button ("Run Generation & Evaluation") triggers the backend LangGraph workflow.
+    * Displays a loading spinner during processing.
+    * Shows the generated Prompt and the (currently simulated) SQL output received from the graph.
+    * Displays placeholder Evaluation Scores (EM/ExecAcc).
+    * Includes an interactive **Feedback Section** (rating slider, issue selection, comments) that appears after generation; submitting feedback logs the input and context (simulated save).
+
+* **State Management:** Utilizes `st.session_state` to maintain user inputs, configuration selections, generated results, and UI visibility across interactions.
+
+### Logging of Step-by-Step Process
+
+* **Configuration:** Logging is configured via `config/logging_config.py`, setting up formatters and handlers (typically console and potentially file output to the `logs/` directory).
+
+* **Execution Trace:** Detailed logs (`INFO`, `DEBUG`, `ERROR`) are generated throughout the application flow:
+    * Records user selections (Dataset, Prompt, LLM) and the input NL query when generation is triggered.
+    * Logs the invocation of the backend LangGraph workflow (`run_nl2sql_graph`).
+    * Traces execution within the LangGraph graph, logging entry into key nodes (`route_preparation`, specific `fetch_..._prompt` nodes, `call_llm_node`).
+    * Shows the routing decision made based on the selected prompt strategy.
+    * Logs details of the (currently simulated) LLM interaction within `sql_gen.py`, including which LLM client class was instantiated.
+    * Captures submitted feedback details and the associated query context.
+    * Records any errors encountered during graph execution or Streamlit processing.
+* **Purpose:** Provides essential visibility for debugging and understanding the step-by-step execution path, including the conditional logic flow within the LangGraph agent.
+
 
 
 ## ToDO 

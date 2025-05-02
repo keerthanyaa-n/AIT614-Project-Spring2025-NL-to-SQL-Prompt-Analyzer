@@ -13,10 +13,7 @@ sys.path.insert(0, str(project_root))
 
 from config.logging_config import setup_logging
 # --- Placeholder imports for other modules ---
-# from core.prompt_generator import generate_prompt
-# from core.llm_interface import query_llm
-# from core.evaluator import evaluate_sql
-# from storage.db_handler import get_datasets, log_result, fetch_evaluation_results, fetch_run_history # Examples
+from graph_logic.graphs import run_nl2sql_graph
 # -----------------------------------------------
 
 
@@ -51,6 +48,8 @@ if 'feedback_issues_multi' not in st.session_state:
     st.session_state.feedback_issues_multi = []
 if 'feedback_comment_combo' not in st.session_state:
     st.session_state.feedback_comment_combo = ""
+if 'ground_truth_input' not in st.session_state:
+    st.session_state.ground_truth_input = ""
 # --------------------------------
 # --- Setup Logging ---
 setup_logging()
@@ -103,66 +102,87 @@ with tab1:
             logger.info(f"NL Query: '{nl_query}'")
             # -------------------------------------
             start_time = time.perf_counter()
+            # THIS IS THE NEW CODE BLOCK TO USE
             try:
-                with st.spinner("Generating SQL query... Please wait."):
-                    # --- Simulate generation ---
-                    logger.info("Simulating backend call (Prompt Gen + LLM Query)...") # INFO level for key step
+                # --- Call the ACTUAL backend graph ---
+                with st.spinner("Running NL2SQL generation graph..."): # Updated spinner message
+                    logger.info("Invoking backend graph...") # <<< Will see this log now
 
+                    # Call the entry point function from graph_logic/graph.py
+                    graph_result_state = run_nl2sql_graph(
+                        nl_query=nl_query,                     # Input from text area
+                        prompt_strategy=selected_prompt_type,  # Input from dropdown
+                        selected_llm=selected_llm              # Input from dropdown
+                    )
 
-                    # Call the LLM functions setup 
-                    # .
-                    # .
-                    # .
-                    time.sleep(3)
+                    logger.info("Backend graph execution attempt complete.") # <<< Will see this log
 
+                    # Extract results and check for errors from the graph
+                    generated_sql = graph_result_state.get("generated_sql")
+                    prompt = graph_result_state.get("final_prompt", "Prompt not captured by graph state.")
+                    graph_error = graph_result_state.get("error")
 
-                    prompt = f"Placeholder prompt for '{nl_query}' using {selected_prompt_type} on {selected_dataset}"
-                    generated_sql = f"SELECT 'placeholder_sql' FROM {selected_dataset} WHERE condition = '{nl_query[:20]}...';"
-                    em_score = "N/A (Needs Ground Truth)"
-                    exec_acc_score = "N/A (Needs Ground Truth & Execution)"
+                    # --- Handle graph execution errors ---
+                    if graph_error:
+                        raise Exception(f"Backend graph execution failed: {graph_error}")
+                    if not generated_sql:
+                         raise Exception("Graph execution finished but no SQL was generated (check logs).")
 
-                    logger.info("Simulation complete.")
-                    # --------------------------
+                # --- Placeholder for Evaluation (using results from graph) ---
+                em_score = "N/A" # Initialize
+                exec_acc_score = "N/A" # Initialize
+                current_ground_truth = st.session_state.ground_truth_input # Get GT
+                if current_ground_truth:
+                    logger.info("Proceeding to placeholder evaluation.")
+                    # Placeholder: Replace with actual call later
+                    # eval_results = evaluate_sql(generated_sql, current_ground_truth, db_conn)
+                    em_score = "0.0 (Eval Placeholder)"
+                    exec_acc_score = "0.0 (Eval Placeholder)"
+                else:
+                    logger.info("No ground truth provided, skipping evaluation step.")
+                # -------------------------------------------------------------
 
-                end_time = time.perf_counter()
+                end_time = time.perf_counter() # Calculate duration AFTER graph runs
                 duration = end_time - start_time
-                st.success("Processing complete!")
+                st.success(f"Processing complete in {duration:.3f} seconds!") # <<< Updated success message
 
-                # --- Store results in session state to persist across reruns ---
+                # --- Store results in session state ---
+                # (This part should be correct from previous steps, uses variables like prompt, generated_sql, em_score etc.)
                 st.session_state.last_prompt = prompt
                 st.session_state.last_sql = generated_sql
                 st.session_state.last_em_score = em_score
                 st.session_state.last_exec_acc_score = exec_acc_score
                 st.session_state.last_duration = duration
-                st.session_state.results_ready = True # Mark results as ready
-                st.session_state.show_feedback = True # Enable feedback section
-
-                # Store context for feedback logging/saving
+                st.session_state.results_ready = True
+                st.session_state.show_feedback = True
                 st.session_state.current_query_context = {
-                    "nl_query": nl_query, "dataset": selected_dataset, "prompt_type": selected_prompt_type,
-                    "llm": selected_llm, "generated_sql": generated_sql, "prompt": prompt,
-                    "duration_sec": duration # Add result_id later if available
+                    # ... (populate context dictionary as before) ...
+                     "nl_query": nl_query, "dataset": selected_dataset, "prompt_type": selected_prompt_type,
+                     "llm": selected_llm, "generated_sql": generated_sql, "prompt": prompt,
+                     "ground_truth_sql": current_ground_truth, "em_score": em_score,
+                     "exec_acc_score": exec_acc_score, "duration_sec": duration, "graph_error": graph_error
                 }
 
-                # --- Log Results (Placeholder) ---
-                logger.debug("Logging results to database ",{
-                    "nl_query": nl_query, "dataset": selected_dataset, "prompt_type": selected_prompt_type,
-                    "llm": selected_llm, "generated_sql": generated_sql, "prompt": prompt,
-                    "duration_sec": duration # Add result_id later if available
-                })
-                # result_id = log_result(**st.session_state.current_query_context)
-                # st.session_state.current_query_context['result_id'] = result_id
-                st.info("Results logged (simulated).")
+                # --- Log Results (Simulated DB Call for now) ---
+                logger.info("Logging results to database (Simulated Call)...") # Keep simulation here for now
+                logger.debug(f"Result Context for Logging: {st.session_state.current_query_context}")
+                # Replace with: result_id = log_result(**st.session_state.current_query_context)
+                st.info("Results logged (simulated DB call).")
+
 
             except Exception as e:
-                # Handle errors, ensure state reflects no results/feedback
+                # Catch errors from graph call or subsequent processing
                 st.session_state.results_ready = False
                 st.session_state.show_feedback = False
                 end_time = time.perf_counter()
                 duration = end_time - start_time
-                logger.error(f"An error occurred during query generation: {e}", exc_info=True)
-                st.error(f"An error occurred during processing: {e}")
+                logger.error(f"An error occurred in 'Run Generation & Evaluation': {e}", exc_info=True)
+                st.error(f"An error occurred: {e}")
                 st.caption(f"Processing time before error: {duration:.3f} seconds")
+            finally:
+                 logger.info("--- End Generate User Query Attempt ---") # Add a clear end marker
+                    # --------------------------
+
 
     # --- Display Results Area (Conditional based on session state) ---
     # This section now runs on *every* rerun, displaying results if they are marked ready

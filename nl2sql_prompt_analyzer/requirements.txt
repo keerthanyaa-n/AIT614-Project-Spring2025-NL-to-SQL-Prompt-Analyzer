@@ -3,3 +3,4 @@ numpy
 streamlit
 pymongo
 python-dotenv
+langgraph
