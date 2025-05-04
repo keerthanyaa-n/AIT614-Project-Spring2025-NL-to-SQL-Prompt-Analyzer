@@ -9,16 +9,16 @@ from pathlib import Path
 from .prompts import (
     fetch_zero_shot_prompt,  
     fetch_few_shot_prompt,  
-    fetch_schema_for_structured # Optional
+    assemble_structured_prompt,
+    generate_table_prediction_prompt
 )
 # -------------------------------------------------
 
 # --- Import schema utility functions ---
 from .schema_utils import (
-    get_all_table_names,
-    predict_relevant_tables,
-    fetch_specific_metadata,
-    assemble_structured_prompt 
+    get_all_table_names_and_descriptions, # Renamed function
+    call_prediction_llm,
+    fetch_specific_metadata
 )
 # -------------------------------------------------
 from .sql_gen import call_llm_node # Node handling LLM calls (class-based)
@@ -50,24 +50,23 @@ def decide_prompt_strategy(state: GraphState) -> str:
 # --- Graph Definition ---
 def build_graph():
     workflow = StateGraph(GraphState)
-    logger.info("Building LangGraph workflow with named structured path start...")
+    logger.info("Building LangGraph workflow with correct node locations...")
 
-    # --- Add nodes ---
+    # --- Add nodes (Functions imported from correct locations) ---
     workflow.add_node("prepare_routing", route_preparation)
-    # Zero/Few Shot prompt nodes
+    # Prompt nodes (from prompts.py)
     workflow.add_node("fetch_zero_shot_prompt", fetch_zero_shot_prompt)
     workflow.add_node("fetch_few_shot_prompt", fetch_few_shot_prompt)
-    # --- >>> Add the new named starting node for structured path <<< ---
-    workflow.add_node("execute_structured_workflow", start_structured_path)
-    # --- >>> End new node <<< ---
-    # Nodes for the structured path steps
-    workflow.add_node("get_all_table_names", get_all_table_names)
-    workflow.add_node("predict_relevant_tables", predict_relevant_tables)
-    workflow.add_node("fetch_specific_metadata", fetch_specific_metadata)
+    workflow.add_node("generate_table_prediction_prompt", generate_table_prediction_prompt) # <<< Node from prompts.py
     workflow.add_node("assemble_structured_prompt", assemble_structured_prompt)
-    # Final SQL generation node
+    # Structured path helper nodes (from schema_utils.py)
+    workflow.add_node("execute_structured_workflow", start_structured_path)
+    workflow.add_node("get_all_table_names_and_descriptions", get_all_table_names_and_descriptions)
+    workflow.add_node("call_prediction_llm", call_prediction_llm) # <<< Node from schema_utils.py
+    workflow.add_node("fetch_specific_metadata", fetch_specific_metadata)
+    # Final SQL generation node (from sql_gen.py)
     workflow.add_node("generate_sql", call_llm_node)
-    logger.info("Nodes added: prepare_routing, zero/few nodes, structured path nodes, generate_sql")
+    logger.info("Nodes added from prompts.py, schema_utils.py, and sql_gen.py")
 
     # --- Define edges ---
     workflow.set_entry_point("prepare_routing")
@@ -79,27 +78,25 @@ def build_graph():
         {
             "run_zero_shot": "fetch_zero_shot_prompt",
             "run_few_shot": "fetch_few_shot_prompt",
-            # --- >>> Point structured start to the new named node <<< ---
-            "run_structured_start": "execute_structured_workflow"
-            # --- >>> End change <<< ---
+            "run_structured_start": "execute_structured_workflow" # Start structured path
         }
     )
-    logger.info("Added conditional edges for prompt strategies starting from 'prepare_routing'.")
+    logger.info("Added conditional edges for prompt strategies.")
 
-    # --- >>> Add edge from the new named node to the first real step <<< ---
-    workflow.add_edge("execute_structured_workflow", "get_all_table_names")
-    # --- >>> End new edge <<< ---
+    # Edge from structured path start node
+    workflow.add_edge("execute_structured_workflow", "get_all_table_names_and_descriptions")
 
-    # --- Edges for the Structured Path sequence ---
-    workflow.add_edge("get_all_table_names", "predict_relevant_tables")
-    workflow.add_edge("predict_relevant_tables", "fetch_specific_metadata")
-    workflow.add_edge("fetch_specific_metadata", "assemble_structured_prompt")
-    # --- End Structured Path ---
+    # --- >>> Edges for the Corrected Structured Path sequence <<< ---
+    workflow.add_edge("get_all_table_names_and_descriptions", "generate_table_prediction_prompt") # Get tables -> Generate prediction prompt (in prompts.py)
+    workflow.add_edge("generate_table_prediction_prompt", "call_prediction_llm") # Prediction prompt -> Call prediction LLM (in schema_utils.py)
+    workflow.add_edge("call_prediction_llm", "fetch_specific_metadata") # Prediction result -> Fetch metadata (in schema_utils.py)
+    workflow.add_edge("fetch_specific_metadata", "assemble_structured_prompt") # Metadata -> Assemble final prompt (in prompts.py)
+    # --- >>> End Structured Path Edges <<< ---
 
-    # --- Edges converging to the final SQL generation node ---
+    # Edges converging to the final SQL generation node
     workflow.add_edge("fetch_zero_shot_prompt", "generate_sql")
     workflow.add_edge("fetch_few_shot_prompt", "generate_sql")
-    workflow.add_edge("assemble_structured_prompt", "generate_sql")
+    workflow.add_edge("assemble_structured_prompt", "generate_sql") # Assembled prompt goes to SQL gen
     logger.info("Added edges from all prompt paths to generate_sql.")
 
     # Final edge
@@ -111,7 +108,6 @@ def build_graph():
     logger.info("LangGraph graph compiled successfully.")
     return app
 
-
 # --- Compile graph when module is loaded ---
 # This assumes build_graph() is safe to call at import time.
 # If build_graph depends on runtime configs, move compilation inside run_nl2sql_graph
@@ -119,35 +115,27 @@ compiled_graph = build_graph()
 
 # --- Entry point function for external calls (e.g., Streamlit) ---
 def run_nl2sql_graph(nl_query: str, prompt_strategy: str, selected_llm: str, dataset_name: str) -> dict:
-    """
-    Invokes the compiled NL2SQL graph with the given inputs.
-    Returns the final state dictionary.
-    """
-    logger.info(f"Invoking NL2SQL graph: Query='{nl_query}', Strategy='{prompt_strategy}', LLM='{selected_llm}'")
-    # Initialize the state for the graph run
+    logger.info(f"Invoking NL2SQL graph: Query='{nl_query}', Strategy='{prompt_strategy}', LLM='{selected_llm}', Dataset='{dataset_name}'")
     initial_state = GraphState(
-        nl_query=nl_query,
-        prompt_strategy=prompt_strategy,
-        llm_config=selected_llm,
-        dataset_context=None,
-        final_prompt=None,
-        generated_sql=None,
-        error=None,
-        all_table_names=None,
+        nl_query=nl_query, prompt_strategy=prompt_strategy, llm_config=selected_llm, dataset_name=dataset_name,
+        # Reset all intermediate states
+        all_tables_names_descs=None,
+        prediction_prompt=None, # <<< Initialize new state key
         relevant_table_names=None,
         relevant_schema_metadata=None,
+        final_prompt=None,
+        generated_sql=None,
+        error=None
     )
     try:
-        # Execute the graph
         final_state = compiled_graph.invoke(initial_state)
         logger.info("Graph execution finished.")
-        # Return the complete final state
         return final_state
     except Exception as e:
-        # Log errors during graph execution and return state with error info
         logger.error(f"Graph invocation failed: {e}", exc_info=True)
-        return {**initial_state, "error": f"Graph Invocation Error: {e}"}
-
+        error_message = f"Graph Invocation Error: {e}"
+        if isinstance(e, KeyError): error_message = f"Graph Invocation Error: Routing key {e} not found."
+        return {**initial_state, "error": error_message}
 
 # --- Visualization logic when run directly as a module ---
 if __name__ == "__main__":

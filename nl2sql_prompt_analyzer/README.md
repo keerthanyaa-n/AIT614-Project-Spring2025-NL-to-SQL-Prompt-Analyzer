@@ -165,7 +165,7 @@ python -m graph_logic.graphs
     * `fetch_run_history`: Retrieves logged runs from the `experiment_runs` collection, supporting filtering. This is integrated into the Streamlit app (Tab 3) to display recent history by default and allow filtered searches.
 * **Status:** Connection, logging, feedback saving, and history fetching are implemented and integrated with the Streamlit UI. Data is successfully being written to and read from MongoDB Atlas.
 
-### LLM Integration 
+### LLM Integration & Structured Prompting
 
 The below 2 API calls can be made for testing the NL2SQL Generated Query : 
 
@@ -173,6 +173,34 @@ The below 2 API calls can be made for testing the NL2SQL Generated Query :
 
 * Gemini 1.5 Flash
 
+There are 3 main prompts used : Zero-Shot ; Few-Shot and Structured/Domain Specific.
+
+* **Real LLM Calls:** The placeholder LLM calls have been replaced with actual API interactions.
+    * Client classes (`OpenAIClient`, `GeminiClient`) are implemented in `graph_logic/sql_gen.py` to handle calls to specific models (e.g., "GPT-4o Mini", "Gemini 1.5 Flash").
+    * API keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`) are loaded securely from the `config/.env` file.
+    * Token usage (prompt, completion, total) is now logged for each API call.
+* **Structured Prompt Path:**
+    * Implemented a multi-step workflow within LangGraph for the "Structured/Domain-Specific" prompt strategy.
+    * **Static Schema:** Uses pre-defined static schema representations (stored as Python lists/dictionaries in `graph_logic/schema.py`) for both benchmark and real-world datasets. Descriptions, column details (as a multi-line string), and foreign keys are included.
+    * **Schema Processing:** Functions in `graph_logic/schema_utils.py` handle reading the static schema (`get_all_table_names_and_descriptions`) and filtering it based on predicted relevant tables (`fetch_specific_metadata`).
+    * **Table Prediction:** Includes a dedicated node (`call_prediction_llm` in `schema_utils.py`) that generates a prompt (using `generate_table_prediction_prompt` from `prompts.py`) and calls an LLM to predict relevant tables based on the user query and table descriptions.
+    * **Prompt Assembly:** Functions in `graph_logic/prompts.py` assemble the final prompt text based on the chosen strategy (Zero-Shot, Few-Shot, or Structured using the fetched specific metadata).
+* **SQL Validation:** A basic Pydantic validator (`SQLQueryValidator` in `sql_gen.py`) is applied to the final output of the SQL-generating LLM (`call_llm_node`) to check if it starts with common SQL keywords, preventing non-SQL text from being processed further.
+
+
+
+## Quickly set up PostgreSQL via Docker 
+
+If you have Docker installed , then you can directly run an instance of Postgre using the below scrip in mac Terminal 
+
+```bash
+docker run -d \       
+  --name postgres-nl2sql \
+  -e POSTGRES_PASSWORD=ait614 \
+  -p 5432:5432 \
+  -v pgdata_nl2sql:/var/lib/postgresql/data \
+  postgres:16
+```
 
 ## ToDO 
 1. Connect to mongo DB 

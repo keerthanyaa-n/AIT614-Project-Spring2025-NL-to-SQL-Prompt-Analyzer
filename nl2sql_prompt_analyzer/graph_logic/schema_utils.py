@@ -1,124 +1,129 @@
 # graph_logic/schema_utils.py
 import logging
-import time
-from typing import List, Dict
-from .state import GraphState # Import GraphState for type hinting
+import time # Keep for MockClient simulation if used
+from typing import List, Dict, Optional, Any
+
+# --- Import State and Static Schema ---
+from .state import GraphState
+try:
+    from .schema import REAL_WORLD_SCHEMA_DEFINITION, BENCHMARK_SCHEMA_DEFINITION
+except ImportError:
+    logging.error("Failed to import schema definitions from graph_logic.schema.")
+    REAL_WORLD_SCHEMA_DEFINITION = [{"table_name": "dummy_real", "description": "dummy", "columns": "id int", "foreign_keys":[]}]
+    BENCHMARK_SCHEMA_DEFINITION = [{"table_name": "dummy_bench", "description": "dummy", "columns": "id int", "foreign_keys":[]}]
+
+# --- Import LLM Client Factory ---
+try:
+    from .sql_gen import get_llm_client, LLMClient
+except ImportError:
+     logging.error("Failed to import get_llm_client from graph_logic.sql_gen.")
+     def get_llm_client(name, config=None): return None
+     LLMClient = None
+# ------------------------------------
 
 logger = logging.getLogger(__name__)
 
-# --- Node 1: Get All Table Names ---
-def get_all_table_names(state: GraphState) -> GraphState:
+# --- Node 1: Get All Table Names and Descriptions (Reads Static Schema) ---
+def get_all_table_names_and_descriptions(state: GraphState) -> Dict[str, Optional[List[Dict[str, str]]]]:
     """
-    (Simulated) Connects to the target SQL DB and fetches all table names.
-    Needs dataset_name from state.
+    Retrieves all table names and their descriptions from the appropriate static schema definition.
     """
-    target_dataset = state.get("dataset_name", "UnknownDB")
-    logger.info(f"Entering get_all_table_names for dataset: {target_dataset}")
-    # --- TODO: Replace with actual DB connection and query ---
-    # Example: conn = connect_to_sql_db(target_dataset); tables = conn.execute("SHOW TABLES;").fetchall()
-    time.sleep(0.5) # Simulate DB query
-    simulated_tables = {
-        "Spider_Dev": ["department", "employee", "project", "works_on"],
-        "BookSQL_Finance": ["cleaned_master_txn_table", "Vendor", "Customer", "Product Service"],
-        "WikiSQL_Test": ["table_1", "table_2", "table_3"],
-        "UnknownDB": ["table_a", "table_b"]
-    }
-    all_tables = simulated_tables.get(target_dataset, ["simulated_table_1", "simulated_table_2"])
-    logger.info(f"Simulated table names fetched: {all_tables}")
-    # --- End Simulation ---
-    return {"all_table_names": all_tables}
+    dataset_name = state.get("dataset_name")
+    logger.info(f"Entering get_all_table_names_and_descriptions for dataset: {dataset_name}")
+    schema_definition = None
+    if dataset_name == "real-world-manufacturing-cars": schema_definition = REAL_WORLD_SCHEMA_DEFINITION
+    elif dataset_name == "sample-benchmark-manufacturing-cars": schema_definition = BENCHMARK_SCHEMA_DEFINITION
+    else: logger.error(f"Unknown dataset: {dataset_name}"); return {"all_tables_names_descs": None, "error": f"Static schema not defined for dataset: {dataset_name}"}
+    if not schema_definition: logger.error(f"Schema missing for {dataset_name}"); return {"all_tables_names_descs": None, "error": f"Schema definition missing for {dataset_name}"}
+    all_tables_with_descs = []
+    for table_info in schema_definition:
+        name = table_info.get("table_name"); desc = table_info.get("description", "No description.")
+        if name: all_tables_with_descs.append({"name": name, "description": desc})
+    logger.info(f"Retrieved {len(all_tables_with_descs)} static table names/descs for {dataset_name}.")
+    return {"all_tables_names_descs": all_tables_with_descs}
 
-# --- Node 2: Predict Relevant Tables ---
-def predict_relevant_tables(state: GraphState) -> GraphState:
-    """
-    (Simulated) Uses a preliminary LLM call to predict relevant tables.
-    Needs nl_query and all_table_names from state.
-    """
-    nl_query = state.get("nl_query", "")
-    all_tables = state.get("all_table_names", [])
-    llm_for_prediction = "CheapLLM (Simulated)" # Could be configurable later
-    logger.info("Entering predict_relevant_tables node.")
-    logger.debug(f"Predicting relevant tables for query: '{nl_query}' from tables: {all_tables}")
 
-    if not nl_query or not all_tables:
-        logger.warning("Missing query or table list for prediction.")
-        return {"relevant_table_names": []}
+# --- Node 2: Call Prediction LLM ---
+def call_prediction_llm(state: GraphState) -> Dict[str, Optional[List[str]]]:
+    """
+    Takes the prediction prompt from the state, calls an LLM, parses the response,
+    and returns the validated list of relevant table names.
+    """
+    logger.info("Entering call_prediction_llm node.")
+    prediction_prompt = state.get("prediction_prompt")
+    all_tables_info = state.get("all_tables_names_descs") # Needed for validation
 
-    # --- TODO: Replace with actual LLM call ---
-    # Construct a prompt like: "Given the question '{nl_query}' and tables {all_tables}, list the relevant tables."
-    # Call a suitable LLM (maybe cheaper/faster one)
-    time.sleep(1.0) # Simulate LLM call
-    # Simulate prediction logic (very basic)
+    # --- Input validation ---
+    if not prediction_prompt: logger.error("Prediction prompt missing."); return {"relevant_table_names": None, "error": "Prediction prompt generation failed."}
+    if all_tables_info is None: logger.error("Original table list missing."); return {"relevant_table_names": None, "error": "Original table list missing for validation."}
+    # --- End Input validation ---
+
+    # --- TODO: Choose which LLM to use for prediction ---
+    prediction_llm_name = state.get("llm_config", "MockLLM") # Use main LLM for now
+    logger.info(f"Using '{prediction_llm_name}' for table prediction.")
+    # ----------------------------------------------------
+
     predicted_tables = []
-    if "employee" in nl_query.lower() and "employee" in all_tables:
-        predicted_tables.append("employee")
-    if "department" in nl_query.lower() and "department" in all_tables:
-        predicted_tables.append("department")
-    if "transaction" in nl_query.lower() and "cleaned_master_txn_table" in all_tables:
-        predicted_tables.append("cleaned_master_txn_table")
-    if not predicted_tables and all_tables: # Fallback: just take the first one if prediction fails
-        predicted_tables.append(all_tables[0])
-    logger.info(f"Simulated relevant tables predicted by {llm_for_prediction}: {predicted_tables}")
-    # --- End Simulation ---
+    error_msg = None
+    try:
+        predictor_client = get_llm_client(prediction_llm_name)
+        if predictor_client is None: raise ValueError(f"Could not instantiate predictor LLM: {prediction_llm_name}")
 
-    return {"relevant_table_names": predicted_tables}
+        # --- Make the LLM call ---
+        # Pass the prediction prompt generated by the previous node
+        response_text = predictor_client.predict_tables(prediction_prompt)
+        logger.info(f"Prediction LLM ({prediction_llm_name}) response: '{response_text}'")
+        # -------------------------
 
-# --- Node 3: Fetch Specific Metadata ---
-def fetch_specific_metadata(state: GraphState) -> GraphState:
+        # --- Parse and Validate the Response ---
+        if response_text.startswith("-- ERROR:") or response_text.startswith("-- WARNING:"):
+            error_msg = f"Prediction LLM failed: {response_text}"
+            logger.error(error_msg)
+        elif response_text.strip().lower() == 'none':
+             logger.info("Prediction LLM indicated no relevant tables.")
+             predicted_tables = []
+        else:
+            raw_predicted_names = [name.strip() for name in response_text.split(',') if name.strip()]
+            valid_table_names = {tbl['name'] for tbl in all_tables_info}
+            predicted_tables = [name for name in raw_predicted_names if name in valid_table_names]
+            invalid_names = set(raw_predicted_names) - set(predicted_tables)
+            if invalid_names: logger.warning(f"Prediction LLM returned invalid table names: {invalid_names}")
+            if not predicted_tables and raw_predicted_names: logger.warning("Prediction LLM returned names, but none matched known tables.")
+            elif predicted_tables: logger.info(f"Validated relevant tables predicted: {predicted_tables}")
+
+    except Exception as e:
+        logger.error(f"Error during table prediction LLM call: {e}", exc_info=True)
+        error_msg = f"Error calling prediction LLM: {e}"
+    # --- End LLM Call and Parsing ---
+
+    if error_msg: return {"relevant_table_names": None, "error": error_msg}
+    else: return {"relevant_table_names": predicted_tables, "error": None}
+
+
+# --- Node 3: Fetch Specific Metadata (Uses Static Schema) ---
+# (This function remains the same as in schema_utils_v8_final)
+def fetch_specific_metadata(state: GraphState) -> Dict[str, Optional[Dict[str, Any]]]:
     """
-    (Simulated) Connects to the target SQL DB and fetches detailed schema
-    (e.g., CREATE TABLE statements) ONLY for the relevant tables.
-    Needs relevant_table_names and dataset_name from state.
+    Retrieves the pre-defined static schema details (full dictionary)
+    for the relevant tables identified in the state.
     """
-    relevant_tables = state.get("relevant_table_names", [])
-    target_dataset = state.get("dataset_name", "UnknownDB")
-    logger.info(f"Entering fetch_specific_metadata for tables: {relevant_tables} in dataset: {target_dataset}")
-
-    if not relevant_tables:
-        logger.warning("No relevant tables identified to fetch metadata for.")
-        return {"relevant_schema_metadata": {}}
-
-    # --- TODO: Replace with actual DB connection and metadata query ---
-    # Example: conn = connect_to_sql_db(target_dataset)
-    # metadata = {}
-    # for table in relevant_tables:
-    #    metadata[table] = conn.execute(f"SHOW CREATE TABLE {table};").fetchone()[1] # Example for MySQL
-    time.sleep(0.7) # Simulate DB query
-    # Simulate metadata
-    simulated_metadata = {
-        "employee": "CREATE TABLE employee (id INT, name VARCHAR(100), dept_id INT);",
-        "department": "CREATE TABLE department (id INT, name VARCHAR(100), location VARCHAR(100));",
-        "cleaned_master_txn_table": "CREATE TABLE cleaned_master_txn_table (Transaction_ID INT, Vendor_Name VARCHAR, ...);",
-        "simulated_table_1": "CREATE TABLE simulated_table_1 (col_a INT, col_b TEXT);"
-    }
-    fetched_metadata = {tbl: simulated_metadata.get(tbl, f"CREATE TABLE {tbl} (...);") for tbl in relevant_tables}
-    logger.info(f"Simulated specific metadata fetched for {len(fetched_metadata)} tables.")
-    logger.debug(f"Fetched Metadata: {fetched_metadata}")
-    # --- End Simulation ---
-
-    return {"relevant_schema_metadata": fetched_metadata}
-
-# --- Node 4: Assemble Final Structured Prompt ---
-def assemble_structured_prompt(state: GraphState) -> GraphState:
-    """
-    Assembles the final prompt using the specific schema metadata.
-    Needs nl_query and relevant_schema_metadata from state.
-    """
-    logger.debug("Entering assemble_structured_prompt node.")
-    nl_query = state['nl_query']
-    metadata = state.get('relevant_schema_metadata', {})
-
-    if not metadata:
-        schema_string = "[No specific schema information available for relevant tables]"
-        logger.warning("Assembling structured prompt without specific metadata.")
-    else:
-        # Format the metadata nicely for the prompt
-        schema_string = "\n\n".join(metadata.values())
-
-    # Construct the final prompt for the main SQL generation LLM
-    prompt = f"Given the following database schema for relevant tables:\n{schema_string}\n\nTranslate the following question to SQL: {nl_query}"
-    logger.info("Assembled final structured prompt.")
-    logger.debug(f"Final prompt for SQL generation:\n{prompt}")
-
-    return {"final_prompt": prompt}
+    relevant_tables = state.get("relevant_table_names")
+    dataset_name = state.get("dataset_name")
+    if relevant_tables is None: logger.error("Metadata fetch skipped: relevant_tables is None."); return {"relevant_schema_metadata": None, "error": "Relevant table prediction failed."}
+    if not dataset_name: logger.error("Metadata fetch skipped: dataset_name missing."); return {"relevant_schema_metadata": None, "error": "Dataset name missing."}
+    if not relevant_tables: logger.warning("No relevant tables for metadata fetch."); return {"relevant_schema_metadata": {}}
+    logger.info(f"Fetching static metadata for tables: {relevant_tables} in dataset: {dataset_name}")
+    schema_definition = None
+    if dataset_name == "real-world-manufacturing-cars": schema_definition = REAL_WORLD_SCHEMA_DEFINITION
+    elif dataset_name == "sample-benchmark-manufacturing-cars": schema_definition = BENCHMARK_SCHEMA_DEFINITION
+    else: logger.error(f"Unknown dataset: {dataset_name}"); return {"relevant_schema_metadata": None, "error": f"Static schema not defined for: {dataset_name}"}
+    if not schema_definition: logger.error(f"Schema missing for {dataset_name}"); return {"relevant_schema_metadata": None, "error": f"Schema definition missing for {dataset_name}"}
+    fetched_metadata: Dict[str, Any] = {}
+    relevant_tables_set = set(relevant_tables)
+    schema_map = {table_info.get("table_name"): table_info for table_info in schema_definition if table_info.get("table_name")}
+    for table_name in relevant_tables:
+        if table_name in schema_map: fetched_metadata[table_name] = schema_map[table_name]; logger.debug(f"Found static schema for: {table_name}")
+        else: logger.warning(f"Schema definition not found for predicted table: {table_name}")
+    logger.info(f"Finished fetching static metadata for {len(fetched_metadata)} tables.")
+    return {"relevant_schema_metadata": fetched_metadata, "error": None}
 

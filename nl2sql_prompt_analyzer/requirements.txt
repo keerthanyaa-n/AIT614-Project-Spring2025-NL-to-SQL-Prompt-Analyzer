@@ -8,3 +8,4 @@ certifi
 openai
 google-generativeai
 pydantic
+psycopg

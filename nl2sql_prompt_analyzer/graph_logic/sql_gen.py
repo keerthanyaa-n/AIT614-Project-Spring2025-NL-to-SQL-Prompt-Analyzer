@@ -107,6 +107,36 @@ class OpenAIClient:
             self.client = None
             raise ConnectionError(f"Unexpected error initializing OpenAI: {e}")
 
+    def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
+        """Internal helper to make the ChatCompletion call and handle common logic."""
+        if not self.client: return "-- ERROR: OpenAI client not initialized."
+        logger.debug(f"Sending to OpenAI:\nSystem: {system_prompt}\nUser: {user_prompt}")
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model_name, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], temperature=0.1)
+            # Log Token Usage
+            if response.usage: logger.info(f"OpenAI API Usage: Prompt={response.usage.prompt_tokens}, Completion={response.usage.completion_tokens}, Total={response.usage.total_tokens} tokens.")
+            else: logger.warning("Token usage info missing.")
+
+            if response.choices:
+                raw_text = response.choices[0].message.content.strip()
+                logger.debug(f"Raw response from OpenAI: {raw_text}")
+                # Clean markdown fences
+                if raw_text.lower().startswith("```sql"): raw_text = raw_text[6:]
+                if raw_text.lower().startswith("```"): raw_text = raw_text[3:]
+                if raw_text.endswith("```"): raw_text = raw_text[:-3]
+                cleaned_text = raw_text.strip()
+                logger.info("Successfully received response from OpenAI.")
+                return cleaned_text
+            else:
+                finish_reason = response.choices[0].finish_reason if response.choices else 'N/A'; logger.warning(f"OpenAI no choices. Finish reason: {finish_reason}"); return f"-- WARNING: OpenAI no choices (Reason: {finish_reason})."
+        # Error Handling
+        except RateLimitError as e: logger.error(f"OpenAI Rate Limit: {e}"); return f"-- ERROR: OpenAI Rate Limit."
+        except APIConnectionError as e: logger.error(f"OpenAI Connection Error: {e}"); return f"-- ERROR: OpenAI Connection Error."
+        except APIStatusError as e: logger.error(f"OpenAI Status Error: {e}"); return f"-- ERROR: OpenAI Status Error: {e.status_code}"
+        except OpenAIError as e: logger.error(f"OpenAI API Error: {e}", exc_info=True); return f"-- ERROR: OpenAI API Error."
+        except Exception as e: logger.error(f"OpenAI Unexpected Error: {e}", exc_info=True); return f"-- ERROR: Unexpected OpenAI call error."
+
     def generate_sql(self, prompt: str) -> str:
         """Generates SQL using the configured OpenAI model, logs tokens, and validates output."""
         if not self.client:
@@ -179,6 +209,16 @@ class OpenAIClient:
         except Exception as e:
             logger.error(f"Unexpected error during OpenAI SQL generation: {e}", exc_info=True)
             return f"-- ERROR: Unexpected error during OpenAI call: {e}"
+        
+    def predict_tables(self, prompt: str) -> str:
+        """Predicts relevant tables using OpenAI model. Returns cleaned text or error string."""
+        logger.info(f"Calling OpenAI model '{self.model_name}' for table prediction.")
+        # System prompt specific to table prediction
+        system_prompt = "You are an assistant that identifies relevant database tables based on a user query and table descriptions. List only the names of the relevant tables, separated by commas. If no tables seem relevant, output 'None'."
+        # The user prompt here is the one constructed by generate_table_prediction_prompt
+        user_prompt = prompt
+        return self._call_openai(system_prompt=system_prompt, user_prompt=user_prompt)
+
 
 
 # --- Updated Gemini Client with REAL API Call ---
@@ -211,6 +251,44 @@ class GeminiClient:
             logger.error(f"An unexpected error occurred during Gemini client initialization: {e}", exc_info=True)
             self.model = None
             raise ConnectionError(f"Unexpected error initializing Gemini: {e}")
+        
+    def _call_gemini(self, full_prompt: str) -> str:
+        """Internal helper to make the Gemini API call."""
+        if not self.model: return "-- ERROR: Gemini model not initialized."
+        logger.debug(f"Sending to Gemini:\n{full_prompt}")
+        generation_config = genai.types.GenerationConfig(temperature=0.1)
+        safety_settings = {}
+        try:
+            response = self.model.generate_content(full_prompt, generation_config=generation_config, safety_settings=safety_settings)
+            # Log Token Usage
+            if hasattr(response, 'usage_metadata') and response.usage_metadata: logger.info(f"Gemini API Usage: Prompt={response.usage_metadata.prompt_token_count}, Completion={response.usage_metadata.candidates_token_count}, Total={response.usage_metadata.total_token_count} tokens.")
+            else: logger.warning("Token usage metadata missing.")
+
+            # Safely access text
+            raw_text = response.text.strip()
+            logger.debug(f"Raw response from Gemini: {raw_text}")
+            # Clean markdown
+            if raw_text.lower().startswith("```sql"): raw_text = raw_text[6:]
+            if raw_text.lower().startswith("```"): raw_text = raw_text[3:]
+            if raw_text.endswith("```"): raw_text = raw_text[:-3]
+            cleaned_text = raw_text.strip()
+            logger.info("Successfully received response from Gemini.")
+            return cleaned_text
+
+        except genai_types.BlockedPromptException as e:
+            logger.error(f"Gemini prompt was blocked: {e}")
+            # Try to log feedback if response object exists
+            try:
+                if response and response.prompt_feedback:
+                     logger.error(f"Gemini Block Feedback: {response.prompt_feedback}")
+            except Exception: pass # Ignore errors trying to get feedback
+            return f"-- ERROR: Gemini prompt blocked."
+        except genai_types.StopCandidateException as e:
+             logger.error(f"Gemini generation stopped unexpectedly: {e}")
+             return f"-- WARNING: Gemini generation stopped unexpectedly (StopCandidateException)."
+        except Exception as e:
+            logger.error(f"Gemini Unexpected Error: {e}", exc_info=True)
+            return f"-- ERROR: Unexpected Gemini call error."
 
     def generate_sql(self, prompt: str) -> str:
         """Generates SQL using the configured Gemini model, logs tokens (if available), and validates output."""
@@ -278,6 +356,27 @@ class GeminiClient:
         except Exception as e:
             logger.error(f"An unexpected error occurred during Gemini SQL generation: {e}", exc_info=True)
             return f"-- ERROR: Unexpected error during Gemini call: {e}"
+        
+    def generate_sql(self, prompt: str) -> str:
+        """Generates SQL using Gemini model. Returns cleaned text or error string."""
+        logger.info(f"Calling Gemini model '{self.model_name}' for SQL generation.")
+        # Construct prompt specific to SQL generation task
+        full_prompt = f"""**Task:** Generate a syntactically correct SQL query for SQLite based on the provided schema and user question.
+**Output Requirements:** ONLY output the SQL query. Do not include explanations, markdown formatting (like ```sql), or any other text.
+
+**Schema:**
+{prompt}
+
+**SQL Query:**"""
+        return self._call_gemini(full_prompt)
+
+    def predict_tables(self, prompt: str) -> str:
+        """Predicts relevant tables using Gemini model. Returns cleaned text or error string."""
+        logger.info(f"Calling Gemini model '{self.model_name}' for table prediction.")
+        # The prompt received here is already formatted by generate_table_prediction_prompt
+        # No extra instructions needed as they are in the prompt itself.
+        full_prompt = prompt
+        return self._call_gemini(full_prompt)
 
 
 # --- Factory Function / Registry ---
@@ -285,7 +384,6 @@ LLM_CLIENT_REGISTRY: Dict[str, Type[LLMClient]] = {
     "MockLLM": MockLLMClient,
     "GPT-4o Mini": OpenAIClient,
     "Gemini 1.5 Flash": GeminiClient,
-    # --- >>> Removed Databricks Entry <<< ---
 }
 
 def get_llm_client(llm_name: str, config: Dict | None = None) -> LLMClient:

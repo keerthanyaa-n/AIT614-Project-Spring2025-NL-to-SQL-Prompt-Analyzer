@@ -1,5 +1,6 @@
 # app/main_streamlit.py
 import streamlit as st
+from datetime import date, datetime
 import logging
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from config.logging_config import setup_logging
 # --- Placeholder imports for other modules ---
 from graph_logic.graphs import run_nl2sql_graph
 from storage.db_handler import log_result, save_feedback, fetch_run_history
+from storage.sql_connector import execute_sql_query
 # -----------------------------------------------
 
 
@@ -56,6 +58,10 @@ if 'history_data' not in st.session_state:
     st.session_state.history_data = None # Store the fetched history (as DataFrame)
 if 'history_loaded' not in st.session_state:
     st.session_state.history_loaded = False # Flag to track initial load
+if 'sql_exec_result_df' not in st.session_state:
+    st.session_state.sql_exec_result_df = None
+if 'sql_exec_error' not in st.session_state:
+    st.session_state.sql_exec_error = None
 # --------------------------------
 # --- Setup Logging ---
 setup_logging()
@@ -95,117 +101,153 @@ tab1, tab2, tab3 = st.tabs(["📊 NL Query Test", "📈 Evaluation Analytics", "
 # --- Tab 1: Live NL Query Testing ---
 # --- Tab 1: Live NL Query Testing ---
 with tab1:
-    st.header("Test NL Query to SQL Generation")
-    st.write("Enter a natural language query and select parameters to generate and evaluate SQL.")
+    st.header("Test NL Query to SQL Generation & Execution") # Updated header
+    st.write("Enter a query, select parameters, generate SQL, and see execution results.")
 
-    # Input area for the natural language query
-    nl_query = st.text_area("Your question:", height=100, placeholder="e.g., Show me the total sales per region for 'Electronics'.", key="nl_query_input")
+    nl_query = st.text_area("Your question:", height=100, key="nl_query_input")
 
-    # Button to trigger the main process
-    if st.button("Run Generation & Evaluation", key="generate_sql_button"):
-        # Reset relevant session state variables for a new run
+    if st.button("Run Generation & Execution", key="generate_sql_button"):
+        # Reset state
         st.session_state.results_ready = False
         st.session_state.show_feedback = False
         st.session_state.last_em_score = "N/A"
         st.session_state.last_exec_acc_score = "N/A"
         st.session_state.last_prompt = None
         st.session_state.last_sql = None
-        st.session_state.current_query_context = {} # Clear previous context
+        st.session_state.current_query_context = {}
+        # --- >>> Reset execution state <<< ---
+        st.session_state.sql_exec_result_df = None
+        st.session_state.sql_exec_error = None
+        # --- >>> End reset <<< ---
 
-        # Check if the user provided a query
+
         if not nl_query:
             st.warning("Please enter a natural language query.")
         else:
-            # Log the start of the process and parameters
             logger.info("--- Begin Generate User Query ---")
             logger.info(f"Parameters: Dataset='{selected_dataset}', PromptType='{selected_prompt_type}', LLM='{selected_llm}'")
             logger.info(f"NL Query: '{nl_query}'")
-            # Get ground truth SQL if provided by the user
-            current_ground_truth = st.session_state.ground_truth_input
-            if current_ground_truth: logger.info("Ground Truth SQL provided for evaluation.")
+            current_ground_truth = st.session_state.ground_truth_input # Get GT if provided
+            if current_ground_truth: logger.info("Ground Truth SQL provided (for later evaluation).")
 
-            start_time = time.perf_counter() # Start timing the operation
+            start_time = time.perf_counter()
 
             try:
-                # --- Call the backend LangGraph workflow ---
+                # --- 1. Call the backend LangGraph workflow ---
                 with st.spinner("Running NL2SQL generation graph..."):
                     logger.info("Invoking backend graph...")
-                    # Call the main entry point function defined in graph_logic/graph.py
                     graph_result_state = run_nl2sql_graph(
-                        nl_query=nl_query,
-                        prompt_strategy=selected_prompt_type,
-                        selected_llm=selected_llm,
-                        dataset_name=selected_dataset
+                        nl_query=nl_query, prompt_strategy=selected_prompt_type,
+                        selected_llm=selected_llm, dataset_name=selected_dataset
                     )
                     logger.info("Backend graph execution attempt complete.")
 
-                    # Extract results from the graph's final state
                     generated_sql = graph_result_state.get("generated_sql")
-                    prompt = graph_result_state.get("final_prompt", "Prompt not captured by graph state.")
-                    graph_error = graph_result_state.get("error")
+                    prompt = graph_result_state.get("final_prompt", "Prompt not captured.")
+                    graph_error = graph_result_state.get("error") # Check if graph itself had error
 
-                    # Handle potential errors reported by the graph execution
-                    if graph_error: raise Exception(f"Backend graph execution failed: {graph_error}")
-                    if not generated_sql: raise Exception("Graph execution finished but no SQL was generated.")
+                    # Handle graph errors first
+                    if graph_error:
+                        raise Exception(f"Graph Error: {graph_error}")
+                    if not generated_sql:
+                        # Handle case where graph finished but SQL is missing (should have error ideally)
+                        raise Exception("Graph execution finished but no SQL was generated.")
 
-                # --- Placeholder for Evaluation Logic ---
-                # Initialize evaluation scores
-                em_score = "N/A"
-                exec_acc_score = "N/A"
-                # If ground truth was provided, run placeholder evaluation
-                if current_ground_truth:
-                    logger.info("Proceeding to placeholder evaluation.")
-                    # TODO: Replace with actual call to evaluator.py functions
-                    em_score = "0.0 (Eval Placeholder)"
-                    exec_acc_score = "0.0 (Eval Placeholder)"
+                # --- 2. Execute the Generated SQL ---
+                st.session_state.sql_exec_result_df = None # Reset before trying
+                st.session_state.sql_exec_error = None
+                # Only execute if SQL was generated successfully by the LLM
+                if generated_sql and not generated_sql.startswith("-- ERROR:") and not generated_sql.startswith("-- WARNING:"):
+                    with st.spinner(f"Executing generated SQL on '{selected_dataset}'..."):
+                        # Call the function from sql_connector.py
+                        exec_df, exec_error = execute_sql_query(generated_sql, selected_dataset)
+                        # Store results in session state
+                        st.session_state.sql_exec_result_df = exec_df # Stores DataFrame or None
+                        st.session_state.sql_exec_error = exec_error # Stores error message or None
+                        if exec_error:
+                            logger.error(f"SQL Execution Failed for dataset '{selected_dataset}': {exec_error}")
+                            # Don't raise exception, just store the error to display it
+                        else:
+                            logger.info(f"SQL Execution Successful for dataset '{selected_dataset}'.")
                 else:
-                    logger.info("No ground truth provided, skipping evaluation step.")
-                # ------------------------------------------
+                    # Handle case where LLM returned an error string or empty SQL
+                    exec_error_msg = generated_sql if generated_sql else "No SQL generated by LLM."
+                    logger.warning(f"Skipping SQL execution: {exec_error_msg}")
+                    st.session_state.sql_exec_error = f"Skipped execution: {exec_error_msg}"
+                # --- End SQL Execution ---
 
-                end_time = time.perf_counter() # Stop timing
-                duration = end_time - start_time
+                # --- 3. Placeholder for Evaluation Logic ---
+                # (Evaluation logic remains placeholder for now)
+                em_score = "N/A"
+                exec_acc_score = "N/A" # This will be updated later based on comparison
+                # TODO: Implement comparison logic here if ground_truth_sql exists
+                # -----------------------------------------
+
+                end_time = time.perf_counter(); duration = end_time - start_time
                 st.success(f"Processing complete in {duration:.3f} seconds!")
 
-                # --- Store results in session state for UI display and feedback ---
+                # --- 4. Store results/context in session state ---
                 st.session_state.last_prompt = prompt
                 st.session_state.last_sql = generated_sql
                 st.session_state.last_em_score = em_score
                 st.session_state.last_exec_acc_score = exec_acc_score
                 st.session_state.last_duration = duration
 
-                # Prepare the context dictionary to be logged to MongoDB
+                # Prepare context dictionary for logging (include execution status)
                 run_context_for_log = {
-                    "nl_query": nl_query,
-                    "dataset": selected_dataset,
-                    "prompt_type": selected_prompt_type,
-                    "llm": selected_llm,
-                    "generated_sql": generated_sql,
-                    "prompt": prompt,
-                    "ground_truth_sql": current_ground_truth,
-                    "em_score": em_score, # Use actual score variables
-                    "exec_acc_score": exec_acc_score,
-                    "duration_sec": duration,
-                    "graph_error": graph_error # Log any error from the graph itself
+                    "nl_query": nl_query, "dataset": selected_dataset, "prompt_type": selected_prompt_type,
+                    "llm": selected_llm, "generated_sql": generated_sql, "prompt": prompt,
+                    "ground_truth_sql": current_ground_truth, "em_score": em_score,
+                    "exec_acc_score": exec_acc_score, "duration_sec": duration, "graph_error": graph_error,
+                    "sql_exec_error": st.session_state.sql_exec_error # Log execution error/status
                 }
-                # Store this context in session state as well (needed for feedback linking)
+                # --- Add execution data if successful and convert dates ---
+                sql_result_data_for_log = None
+                if st.session_state.sql_exec_result_df is not None and st.session_state.sql_exec_error is None:
+                    if not st.session_state.sql_exec_result_df.empty:
+                         max_log_rows = 50 # Example limit
+                         df_to_log = st.session_state.sql_exec_result_df.head(max_log_rows)
+                         # Convert DataFrame to list of dictionaries
+                         list_of_dicts = df_to_log.to_dict('records')
+
+                         # --- >>> Convert datetime.date to datetime.datetime <<< ---
+                         processed_list = []
+                         for row_dict in list_of_dicts:
+                             processed_row = {}
+                             for key, value in row_dict.items():
+                                 if isinstance(value, date) and not isinstance(value, datetime):
+                                     # Convert date to datetime (setting time to midnight)
+                                     processed_row[key] = datetime.combine(value, datetime.min.time())
+                                 else:
+                                     processed_row[key] = value
+                             processed_list.append(processed_row)
+                         sql_result_data_for_log = processed_list
+                         # --- >>> End Date Conversion <<< ---
+
+                         if len(st.session_state.sql_exec_result_df) > max_log_rows:
+                              logger.warning(f"SQL result has {len(st.session_state.sql_exec_result_df)} rows. Logging only first {max_log_rows}.")
+                    else:
+                         # Log empty list if query returned no rows or was non-SELECT
+                         sql_result_data_for_log = []
+
+                run_context_for_log["sql_execution_result_data"] = sql_result_data_for_log # Add results (or None if error/skipped)
+                # --- End context preparation ---
+
                 st.session_state.current_query_context = run_context_for_log.copy()
 
-                # --- Log Results to MongoDB ---
+                # --- 5. Log Results to MongoDB ---
                 logger.info("Logging results to database...")
-                # Call the log_result function from db_handler.py
                 result_id = log_result(run_context_for_log)
                 if result_id:
-                    # Store the returned MongoDB document ID in session state context
                     st.session_state.current_query_context['mongodb_id'] = result_id
                     st.info(f"Results logged to DB (ID: {result_id}).")
                     logger.info(f"Successfully logged run with MongoDB ID: {result_id}")
                 else:
-                    # Handle logging failure
                     st.warning("Failed to log results to database.")
                     logger.error("Failed to get result ID from log_result.")
                 # --- End Logging ---
 
-                # Set flags to display the results and feedback sections
+                # Set flags for UI display
                 st.session_state.results_ready = True
                 st.session_state.show_feedback = True
 
@@ -216,19 +258,18 @@ with tab1:
                 st.session_state.show_feedback = False
                 end_time = time.perf_counter()
                 duration = end_time - start_time # Duration before error
-                logger.error(f"An error occurred in 'Run Generation & Evaluation': {e}", exc_info=True)
-                st.error(f"An error occurred: {e}")
+                logger.error(f"An error occurred in 'Run Generation & Execution': {e}", exc_info=True)
+                st.error(f"An error occurred: {e}") # Display error in UI
                 st.caption(f"Processing time before error: {duration:.3f} seconds")
             finally:
-                 # Log the end of the attempt regardless of success/failure
                  logger.info("--- End Generate User Query Attempt ---")
 
 
     # --- Display Results Area ---
     # This section is displayed only if results are ready (flag set in session state)
     if st.session_state.get('results_ready', False):
-        st.markdown("---") # Separator
-        st.subheader("Generated Output & Evaluation")
+        st.markdown("---")
+        st.subheader("Generated Output")
         # Display the prompt used
         st.text("Generated Prompt:")
         st.code(st.session_state.last_prompt or "N/A", language='text')
@@ -238,82 +279,80 @@ with tab1:
         # Display the ground truth SQL if it was provided
         gt_sql_context = st.session_state.current_query_context.get("ground_truth_sql")
         if gt_sql_context:
-             st.text("Ground Truth SQL (Used for Eval):")
+             st.text("Ground Truth SQL (For Eval):")
              st.code(gt_sql_context, language='sql')
         # Display evaluation scores (currently placeholders)
         st.markdown(f"**Evaluation Scores (Placeholders):**")
         st.metric("Exact Match (EM) Score", st.session_state.last_em_score)
         st.metric("Execution Accuracy (ExecAcc) Score", st.session_state.last_exec_acc_score)
-        # Display processing time
         st.caption(f"Total processing time: {st.session_state.last_duration:.3f} seconds")
+
+        # --- >>> Display SQL Execution Results <<< ---
+        st.markdown("---")
+        st.subheader("SQL Execution Result")
+        # Check if an error occurred during execution
+        if st.session_state.sql_exec_error:
+            st.error(f"Execution Failed: {st.session_state.sql_exec_error}")
+        # Check if the result DataFrame exists (it might be None if error occurred)
+        elif st.session_state.sql_exec_result_df is not None:
+            # Check if the DataFrame is empty
+            if st.session_state.sql_exec_result_df.empty:
+                 # Check if it was an empty result from a non-SELECT query that succeeded
+                 if "rows_affected" in st.session_state.sql_exec_result_df.columns:
+                     st.success(f"Query executed successfully. Rows affected: {st.session_state.sql_exec_result_df['rows_affected'].iloc[0]}")
+                 else:
+                     # It was likely a SELECT query that returned no rows
+                     st.success("Query executed successfully. No rows returned.")
+            else:
+                 # Display the DataFrame with results
+                 st.dataframe(st.session_state.sql_exec_result_df)
+        else:
+            # This state might occur if execution was skipped due to LLM error
+            st.info("SQL execution was skipped or did not produce results.")
+        # --- >>> End Display SQL Execution <<< ---
 
 
     # --- Feedback Section ---
-    # This section is displayed only if feedback should be shown (flag set in session state)
+    # This section is displayed only if feedback should be shown
     if st.session_state.get('show_feedback', False):
+        # ... (Feedback form and submission logic remains the same) ...
         st.divider() # Separator
         st.subheader("Feedback on Generated SQL")
-
-        # Feedback input widgets (rating, issues, comment)
         rating_options = ["Very Bad", "Bad", "OK", "Good", "Very Good"]
         feedback_rating = st.select_slider("Overall rating:", options=rating_options, key="feedback_rating_slider")
         selected_issues = []
-        # Show issue selection only if rating is not "Very Good"
         if st.session_state.feedback_rating_slider != "Very Good":
             issue_categories = ["Incorrect Table(s)", "Incorrect Column(s)", "Wrong Aggregation", "Incorrect Filter/WHERE", "Syntax Error", "Doesn't Answer Question", "Other"]
             selected_issues = st.multiselect("Select issue categories (optional):", options=issue_categories, key="feedback_issues_multi")
         feedback_comment = st.text_area("Optional comments:", key="feedback_comment_combo", height=100)
 
-        # Button to submit feedback
         if st.button("Submit Feedback", key="submit_feedback_button_combo"):
-            # Get feedback values from session state (linked to widgets)
             rating_value = st.session_state.feedback_rating_slider
             issues_value = st.session_state.feedback_issues_multi
             comment_value = st.session_state.feedback_comment_combo
-
-            # Log feedback details
             logger.info(f"Feedback received: Rating='{rating_value}', Issues='{issues_value}', Comment='{comment_value}'")
             logger.info(f"Feedback context: {st.session_state.current_query_context}")
-
-            # --- Save Feedback to MongoDB ---
-            # Retrieve the MongoDB ID of the run we are giving feedback for
             run_id_to_update = st.session_state.current_query_context.get('mongodb_id')
-
             if run_id_to_update:
                 logger.info(f"Attempting to save feedback for MongoDB ID: {run_id_to_update}")
                 try:
-                    # Call the save_feedback function from db_handler.py
-                    success = save_feedback(
-                        run_id=run_id_to_update,
-                        rating=rating_value,
-                        issues=issues_value,
-                        comment=comment_value
-                    )
+                    success = save_feedback(run_id=run_id_to_update, rating=rating_value, issues=issues_value, comment=comment_value)
                     if success:
-                        # If save successful, show success message and reset UI
                         st.success("Thank you for your feedback! (Saved to DB)")
                         st.session_state.show_feedback = False # Hide form
                         st.session_state.results_ready = False # Hide results
-                        # Reset feedback widgets to defaults
-                        # st.session_state.feedback_rating_slider = "OK"
-                        # st.session_state.feedback_issues_multi = []
-                        # st.session_state.feedback_comment_combo = ""
                         logger.info(f"Successfully saved feedback for run {run_id_to_update}.")
-                        st.rerun() # Force a UI refresh to reflect state changes
+                        st.rerun() # Force a UI refresh
                     else:
-                        # Handle save failure reported by db_handler
                         st.error("Sorry, there was an issue saving your feedback to the database.")
                         logger.error(f"save_feedback function returned False for run {run_id_to_update}.")
-
                 except Exception as e:
-                    # Handle unexpected errors during save attempt
                     logger.error(f"Failed to save feedback to DB for run {run_id_to_update}: {e}", exc_info=True)
                     st.error("Sorry, an unexpected error occurred while saving your feedback.")
             else:
-                # Handle case where the run ID wasn't found (e.g., user refreshed page before feedback)
                 st.error("Cannot save feedback: Missing the Run ID for the previous query. Please generate SQL again.")
                 logger.error("Cannot save feedback: 'mongodb_id' not found in current_query_context.")
-            # --- End Save Feedback ---
+
 
 # --- Tab 2: Evaluation Analytics ---
 # with tab2:
