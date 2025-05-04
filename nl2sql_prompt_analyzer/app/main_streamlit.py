@@ -295,8 +295,8 @@ with tab1:
              st.code(gt_sql_context, language='sql')
         # Display evaluation scores (currently placeholders)
         st.markdown(f"**Evaluation Scores (Placeholders):**")
-        st.metric("Exact Match (EM) Score", st.session_state.last_em_score)
-        st.metric("Execution Accuracy (ExecAcc) Score", st.session_state.last_exec_acc_score)
+        # st.metric("Exact Match (EM) Score", st.session_state.last_em_score)
+        # st.metric("Execution Accuracy (ExecAcc) Score", st.session_state.last_exec_acc_score)
         st.caption(f"Total processing time: {st.session_state.last_duration:.3f} seconds")
 
         # --- >>> Display Token Usage <<< ---

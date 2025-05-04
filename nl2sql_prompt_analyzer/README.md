@@ -23,15 +23,15 @@ nl2sql_prompt_analyzer/
 ├── app/              # Contains the main Streamlit user interface code
 │   └── main_streamlit.py # Entry point for the Streamlit application
 │
-├── data_handling/    # Utilities for loading datasets and schemas
-│   ├── dataset_loader.py   # Functions to load/access dataset info
-│   └── schema_utils.py     # Functions to fetch/format schema data for prompts
-│
 ├── storage/          # Handles interaction with the database (SQL)
 │   └── db_handler.py       # Functions for database operations (CRUD for logs, results, etc.)
+│   └── sql_connector.py       # Functions for  LLM operations for SQL Query generation
+│   └── test_mongo_connection.py       # Standalone script to test MongoDB connection for NoSQL database
 │
 ├── experiments/      # Scripts for running automated batch experiments
-│   └── run_experiments.py  # Main script to run evaluation batches
+│   └── Google-Gemini-API.html # Sample Databricks code to assess the LLM usage
+│   └── OpenAI-API.html # Sample Databricks code to assess the LLM usage
+|
 ├── graph_logic/          # <<< NEW DIRECTORY FOR LANGGRAPH COMPONENTS
 │   ├── __init__.py
 │   ├── state.py          # Defines the graph state
@@ -49,11 +49,11 @@ nl2sql_prompt_analyzer/
 │   ├── settings.py         # Stores API keys, DB connection strings, model params
 │   └── logging_config.py   # Configures application logging
 │
-├── tests/            # Unit and integration tests (Optional)
-│
 ├── logs/             # Directory where .log files are written local logs (during development, can be removed later)
 │
-├── datasets/         # Placeholder for storing small datasets or schema files
+├── datasets/         # Placeholder for storing small datasets or schema files\
+│   └── real-world-manufacturing-cars.sql   # .sql file for Real world data simulation
+│   └── sample-benchmark-manufacturing-cars.sql   # .sql file for benchamrk data simulation
 │
 ├── requirements.txt  # Project dependencies
 ├── README.md         # This file
