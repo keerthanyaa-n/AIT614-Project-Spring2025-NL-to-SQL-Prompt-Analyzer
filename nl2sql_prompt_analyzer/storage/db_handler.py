@@ -115,6 +115,37 @@ def get_feedback_collection():
         return None
 # --- End Corrected Checks ---
 
+def get_distinct_field_values(field_name: str) -> List[str]:
+    """
+    Fetches the distinct non-null values for a given field from the runs collection.
+
+    Args:
+        field_name: The name of the field to get distinct values for (e.g., "dataset", "llm").
+
+    Returns:
+        A list of distinct string values found for that field, or an empty list on error/no data.
+    """
+    collection = get_runs_collection()
+    if collection is None:
+        logger.error(f"Cannot get distinct values for '{field_name}': Failed to get runs collection.")
+        return []
+
+    try:
+        logger.info(f"Fetching distinct values for field: '{field_name}'")
+        # Find documents where the field exists and is not null
+        distinct_values = collection.distinct(field_name, {field_name: {"$ne": None}})
+        # Filter out any potential non-string values if needed, although dataset/llm/prompt should be strings
+        string_values = [str(val) for val in distinct_values if isinstance(val, str)]
+        logger.info(f"Found {len(string_values)} distinct values for '{field_name}': {string_values}")
+        return string_values
+    except OperationFailure as e:
+        logger.error(f"Failed to get distinct values for '{field_name}' (OperationFailure): {e.details}", exc_info=True)
+        return []
+    except Exception as e:
+        logger.error(f"An unexpected error occurred fetching distinct values for '{field_name}': {e}", exc_info=True)
+        return []
+
+
 # --- Updated Checks in Logging/Fetching Functions ---
 def log_result(run_context: Dict[str, Any]) -> Optional[str]:
     """Logs the details of a completed NL2SQL run to the database."""

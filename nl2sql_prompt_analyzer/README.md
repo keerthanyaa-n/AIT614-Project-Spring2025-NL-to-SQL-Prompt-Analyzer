@@ -193,7 +193,19 @@ There are 3 main prompts used : Zero-Shot ; Few-Shot and Structured/Domain Speci
     * **Prompt Assembly:** Functions in `graph_logic/prompts.py` assemble the final prompt text based on the chosen strategy (Zero-Shot, Few-Shot, or Structured using the fetched specific metadata).
 * **SQL Validation:** A basic Pydantic validator (`SQLQueryValidator` in `sql_gen.py`) is applied to the final output of the SQL-generating LLM (`call_llm_node`) to check if it starts with common SQL keywords, preventing non-SQL text from being processed further.
 
+### Analytics Tab (`app/main_streamlit.py` - Tab 2)
 
+* **Purpose:** Provides visualizations and aggregated statistics based on the experiment runs logged in the MongoDB `experiment_runs` collection.
+* **Data Fetching:** Uses aggregation functions defined in `storage/db_handler.py` (`get_overall_stats`, `get_stats_by_group`, `get_feedback_summary_by_prompt`) to query MongoDB. Includes a "Refresh Data" button.
+* **Filtering & Grouping:** Allows users to filter results by Dataset ("Overall", "sample-benchmark...", "real-world...") and group performance breakdowns by either "LLM" or "Prompt Type" using sidebar controls.
+* **Displayed Metrics:**
+    * **Overall Performance:** Shows total runs, average processing duration, average token usage (generation and prediction combined), overall SQL execution success rate, and overall LLM/Graph error rate across all logged data.
+    * **Performance by Dataset:** Displays a table comparing key metrics (Runs, Avg Duration, Avg Tokens, SQL Success %, Error %) for each dataset.
+    * **Performance by Prompt Type:** Displays a table and a bar chart comparing key metrics across the different prompt strategies (Zero-Shot, Few-Shot, Structured).
+    * **Performance by Dataset & Prompt Type:** Shows a detailed table breaking down metrics for each combination of dataset and prompt type. Includes an optional grouped bar chart comparing SQL success rates.
+    * **Performance by Dataset & LLM:** Shows a detailed table breaking down metrics for each combination of dataset and LLM used. Includes an optional grouped bar chart comparing SQL success rates.
+    * **Feedback Summary:** Displays a table summarizing the distribution of user feedback ratings ("Very Bad" to "Very Good") for each prompt type, along with a stacked bar chart visualization.
+* **Status:** Implemented and functional, displaying statistics based on the currently logged data. (Note: EM/ExecAcc scores are currently placeholders).
 
 ## Quickly set up PostgreSQL via Docker 
 
@@ -208,14 +220,3 @@ docker run -d \
   postgres:16
 ```
 
-## ToDO 
-1. Connect to mongo DB 
-2. test MongoDB connection, with sample feedback values being pushed in to MongoDB 
-3. Add langgraph nodes 
-4. Add LLM nodes to depict sample Node flows 
-5. Error handling
-6. testing the above pointers
-7. LLM selection
-8. DB creation 
-9. INtegrate Prompts 
-10. test and evaluate. 

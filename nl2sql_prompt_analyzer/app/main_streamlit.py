@@ -15,35 +15,8 @@ sys.path.insert(0, str(project_root))
 from config.logging_config import setup_logging
 # --- Placeholder imports for other modules ---
 from graph_logic.graphs import run_nl2sql_graph
-from storage.db_handler import log_result, save_feedback, fetch_run_history, get_stats_by_group
+from storage.db_handler import log_result, save_feedback, fetch_run_history, get_stats_by_group, get_feedback_summary_by_prompt, get_distinct_field_values, get_overall_stats
 from storage.sql_connector import execute_sql_query
-# Make sure you have the path correctly set up to import your storage module
-try:
-    import storage.db_handler as db_handler
-    # Optionally, add a function in db_handler to get distinct values for filters
-    # Example: get_distinct_field_values(field_name)
-    if not hasattr(db_handler, 'get_distinct_field_values'):
-        # Define a placeholder if it doesn't exist, or implement it in db_handler
-        def get_distinct_field_values(field_name):
-             # Placeholder implementation - replace with actual DB query
-             if field_name == 'dataset':
-                 # In a real scenario, query MongoDB: collection.distinct('dataset')
-                 # Use the samples provided earlier for placeholder data
-                 return ["sample-benchmark-manufacturing-cars"]
-             else:
-                 return []
-        db_handler.get_distinct_field_values = get_distinct_field_values # Attach if missing
-
-except ImportError:
-    st.error("Failed to import `storage.db_handler`. Please ensure it's accessible.")
-    # You might want to use st.stop() here or define dummy functions for UI layout
-    # For demonstration, we'll define dummy functions if import fails
-    class DummyDBHandler:
-        def get_overall_stats(self): return None
-        def get_stats_by_group(self, group_by_fields, filters=None): return None
-        def get_distinct_field_values(self, field_name): return ["dummy_dataset"] if field_name == 'dataset' else []
-    db_handler = DummyDBHandler()
-    st.warning("Using dummy data handlers as `storage.db_handler` failed to import.")
 
 # -----------------------------------------------
 
@@ -108,8 +81,9 @@ st.title("NL2SQL Prompt Engineering Analyzer")
 with st.sidebar:
     st.header("Configuration")
     available_datasets = [
+        "real-world-manufacturing-cars",
         "sample-benchmark-manufacturing-cars",
-        "real-world-manufacturing-cars"
+
     ]
     available_prompt_types = ["Zero-Shot", "Few-Shot", "Structured/Domain-Specific"]
     available_llms = ["GPT-4o Mini", "Gemini 1.5 Flash"]
@@ -426,7 +400,7 @@ with tab2:
 
     try:
         # Fetch distinct datasets for the selector
-        available_datasets_analytics = db_handler.get_distinct_field_values("dataset")
+        available_datasets_analytics = get_distinct_field_values("dataset")
         if not available_datasets_analytics: # Handle case where no datasets are found
             st.sidebar.warning("No datasets found for analytics.")
             dataset_options_analytics = ["Overall"]
@@ -468,7 +442,7 @@ with tab2:
     st.subheader("Overall System Performance (All Datasets)")
     overall_stats_analytics = None
     try:
-        overall_stats_analytics = db_handler.get_overall_stats()
+        overall_stats_analytics = get_overall_stats()
     except Exception as e:
         st.error(f"Error retrieving overall stats: {e}")
         logger.error("Error calling get_overall_stats", exc_info=True)
@@ -504,7 +478,7 @@ with tab2:
     grouped_stats_analytics = None
     try:
         # Pass the group_by field as a list, and apply filters only if a specific dataset is selected
-        grouped_stats_analytics = db_handler.get_stats_by_group(
+        grouped_stats_analytics = get_stats_by_group(
             group_by_fields=[group_by_field_analytics],
             filters=filters_analytics if selected_dataset_analytics != "Overall" else None
         )
@@ -690,6 +664,55 @@ with tab2:
 
     else:
         st.warning("Could not fetch statistics grouped by dataset and LLM.")
+
+    # --- 4. Feedback Summary by Prompt Type <<< ---
+    st.subheader("Feedback Summary by Prompt Type")
+    try:
+        feedback_summary = get_feedback_summary_by_prompt()
+        if feedback_summary:
+            # Prepare data for display
+            feedback_data = []
+            # Define the desired order of ratings
+            rating_order = ["Very Bad", "Bad", "OK", "Good", "Very Good"]
+            all_prompt_types = set(item['_id'] for item in feedback_summary) | set(available_prompt_types) # Ensure all types are shown
+
+            for prompt_type in sorted(list(all_prompt_types)):
+                row = {"Prompt Type": prompt_type}
+                # Find the data for this prompt type
+                data = next((item for item in feedback_summary if item['_id'] == prompt_type), None)
+                if data:
+                    row["Total Feedback"] = data.get("total_feedback", 0)
+                    ratings = data.get("ratings", {})
+                    for rating in rating_order:
+                        row[rating] = ratings.get(rating, 0) # Get count or 0 if rating doesn't exist
+                else:
+                    # If no feedback for this prompt type, show zeros
+                    row["Total Feedback"] = 0
+                    for rating in rating_order:
+                        row[rating] = 0
+                feedback_data.append(row)
+
+            if feedback_data:
+                df_feedback = pd.DataFrame(feedback_data)
+                # Set Prompt Type as index for better chart display
+                df_feedback.set_index('Prompt Type', inplace=True)
+                # Display table
+                st.dataframe(df_feedback)
+                # Display stacked bar chart
+                st.bar_chart(df_feedback[rating_order]) # Chart only the rating columns
+                st.caption("Chart: Distribution of Feedback Ratings by Prompt Type")
+            else:
+                 st.info("No feedback data found to display.")
+
+        elif feedback_summary == []:
+             st.info("No feedback data found to display.")
+        else:
+            st.warning("Could not fetch feedback summary.")
+    except Exception as e:
+        logger.error(f"Error displaying feedback summary: {e}", exc_info=True)
+        st.error("An error occurred while fetching feedback summary.")
+    # --- >>> End Section 6 <<< ---
+
 
 
 
