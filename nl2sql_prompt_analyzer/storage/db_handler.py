@@ -28,7 +28,7 @@ else:
 
 MONGODB_URI = os.environ.get("MONGODB_CONNECTION_URL")
 DATABASE_NAME = "nl2sql_analyzer"
-RUNS_COLLECTION = "experiment-002"
+RUNS_COLLECTION = os.environ.get("COLLECTION_NAME")
 FEEDBACK_COLLECTION = "run_feedback"
 
 # --- Global Client Variable ---

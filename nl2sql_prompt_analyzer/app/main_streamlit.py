@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 # --- Streamlit App Layout ---
 st.set_page_config(layout="wide")
-st.title("NL2SQL Prompt Engineering Analyzer")
+st.title("NL2SQL Prompt Analyzer")
 
 
 # logger.info("="*20 + " Streamlit App Started/Refreshed " + "="*20) # Clear marker for app start/rerun
@@ -100,7 +100,6 @@ with st.sidebar:
 # --- Main Area with Tabs ---
 tab1, tab2, tab3 = st.tabs(["📊 NL Query Test", "📈 Evaluation Analytics", "📜 Run History"])
 
-# --- Tab 1: Live NL Query Testing ---
 # --- Tab 1: Live NL Query Testing ---
 with tab1:
     st.header("Test NL Query to SQL Generation & Execution") # Updated header
@@ -406,6 +405,7 @@ with tab2:
             dataset_options_analytics = ["Overall"]
         else:
             # Use set for uniqueness and sort, ensure 'Overall' is first
+            logger.info(f"Datasets : {get_distinct_field_values}")
             dataset_options_analytics = ["Overall"] + sorted(list(set(available_datasets_analytics)))
 
     except Exception as e:
