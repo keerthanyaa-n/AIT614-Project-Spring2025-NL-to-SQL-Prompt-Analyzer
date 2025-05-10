@@ -220,3 +220,11 @@ docker run -d \
   postgres:16
 ```
 
+# Acknowledgements
+
+This project was inspired by my experience working at [AIqwip](https://aiqwip.com/nl-2-sql-natural-language-user-questions-to-data-base-sql-queries-using-generative-ai/)
+, where I had the opportunity to explore natural language to SQL query generation using generative AI. Their work provided a foundational perspective that helped shape the direction of this project.
+
+I would also like to thank Professor Dr. Bin Duan and TA Zijie He for their invaluable guidance and support throughout the development of this project.
+
+- Keerthanyaa Nirmalkumar
