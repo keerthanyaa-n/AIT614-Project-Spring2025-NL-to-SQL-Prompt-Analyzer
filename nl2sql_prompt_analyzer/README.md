@@ -60,11 +60,15 @@ nl2sql_prompt_analyzer/
 └── .gitignore        # Specifies intentionally untracked files for Git
 ```
 
+## Architecture (high level) using LangGraph
+
+![Architecture](graph_logic/graph_visualization_mermaid.png)
+
 ## Setup
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repository-url>
+    git clone https://github.com/keerthanyaa/AIT614-Project-Spring2025-NL-to-SQL-Prompt-Analyzer.git
     cd nl2sql_prompt_analyzer
     ```
 
@@ -90,7 +94,7 @@ nl2sql_prompt_analyzer/
     *(Note: You need to add necessary packages like `streamlit`, database drivers, LLM SDKs, etc., to `requirements.txt`)*
 
 4.  **Configure Settings:**
-    * Update `config/settings.py` with your LLM API keys and database connection details (once the DB setup is complete).
+    * Update `config/settings.py` and Copy the content of `config/.env.example` to `config/.env` with your LLM API keys and database connection details (once the DB setup is complete).
 
 ## Usage
 
@@ -117,6 +121,10 @@ To run the Scripts of postgresql :
 ```bash
 python scripts/create_postgres_dbs.py
 ```
+
+Here's a peek of how the ideal VS real world dataset might look like : 
+
+![Ideal vs Real](assets/peek-into-sample-dataset.png)
 
 ## Working Components
 
@@ -207,6 +215,12 @@ There are 3 main prompts used : Zero-Shot ; Few-Shot and Structured/Domain Speci
     * **Feedback Summary:** Displays a table summarizing the distribution of user feedback ratings ("Very Bad" to "Very Good") for each prompt type, along with a stacked bar chart visualization.
 * **Status:** Implemented and functional, displaying statistics based on the currently logged data. (Note: EM/ExecAcc scores are currently placeholders).
 
+## Sample results : 
+
+![Interface](assets/interface.png)
+![sample-results](assets/sample-result2.png)
+![sample-results](assets/sample-results.png)
+
 ## Quickly set up PostgreSQL via Docker 
 
 If you have Docker installed , then you can directly run an instance of Postgre using the below scrip in mac Terminal 
@@ -218,6 +232,22 @@ docker run -d \
   -p 5432:5432 \
   -v pgdata_nl2sql:/var/lib/postgresql/data \
   postgres:16
+```
+
+or use the command (one line)
+```bash 
+docker run -d --name postgres-nl2sql -e POSTGRES_PASSWORD=ait614 -p 5432:5432 -v pgdata_nl2sql:/var/lib/postgresql/data postgres:16
+```
+
+
+## Quickly set up MongoDB via Docker 
+
+If you have Docker installed , then you can directly run an instance of MongoDB using the below script in mac Terminal 
+
+
+or use the command (one line)
+```bash 
+docker run -d --name mongodb-nl2sql -p 27018:27017 -v mongo_nl2sql:/data/db mongo:8.0
 ```
 
 # Acknowledgements
